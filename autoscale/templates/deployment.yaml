@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.serverName }}-deployment
+  labels:
+    {{- include "autoscale.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "autoscale.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "autoscale.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "autoscale.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+          - mountPath: /data
+            name: server-script
+      volumes:
+      - name: server-script
+        configMap:
+          name: autoscale-script
+          items:
+            - key: server.py
+              path: app.py
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.clientName }}-deployment
+  labels:
+    app: http-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: http-client
+  template:
+    metadata:
+      labels:
+        app: http-client
+    spec:
+      containers:
+        - name: http-client
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+          - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+          volumeMounts:
+          - mountPath: /data
+            name: client-script
+      volumes:
+      - name: client-script
+        configMap:
+          name: autoscale-script
+          items:
+            - key: client.py
+              path: app.py
+
+# ---
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: {{ .Values.clientName }}-pod
+#   labels:
+#     app: http-client
+# spec:
+#   containers:
+#   - name: http-client
+#     image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+#     imagePullPolicy: IfNotPresent
+#     ports:
+#     - containerPort: 8080
+#     readinessProbe:
+#       httpGet:
+#         path: /
+#         port: 8080
+#     volumeMounts:
+#     - mountPath: /data
+#       name: client-script
+#   volumes:
+#   - name: client-script
+#     configMap:
+#       name: autoscale-script
+#       items:
+#         - key: client.py
+#           path: app.py

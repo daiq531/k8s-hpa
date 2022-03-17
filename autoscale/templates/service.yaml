@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.serverName }}-svc
+  labels:
+    {{- include "autoscale.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "autoscale.selectorLabels" . | nindent 4 }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.clientName }}-svc
+spec:
+  type: LoadBalancer
+  selector:
+    app: http-client
+  ports:
+  - port: 80
+    targetPort: 8080

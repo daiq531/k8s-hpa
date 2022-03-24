@@ -27,37 +27,6 @@ from cloudsure.tpkg_core.user_script.types.user_script_v1 import UserScriptV1
 from cloudsure.providers.nfv.k8s.client_initializer import ClientInitializer
 
 
-class MonitorThread(Thread):
-    def __init__(self, script, start_time, cpu_util, http_rate, timeout=180, query_interval=1):
-        self.script = script
-        self.start_time = start_time
-        self.cpu_util = cpu_util
-        self.http_rate = http_rate
-        self.run_flag = True
-
-    def run():
-        while self.run_flag:
-            now = time.monotonic()
-            if (now - self.start_time) > timeout:
-                self.script.event.set()
-                self.script._iq.write(label="Monitor duration timeout",
-                                      value="start time: {}, end time: {}".format(self.start_time, now))
-                break
-
-            # query and output hpa status and
-            hpa_status = self.script.get_hpa_status(self.script.hpa_name)
-            self.script._iq.write(label="HPA status under CPU util: {}, Http rate: {}".format(self.cpu_util, self.http_rate),
-                                  value=str(hpa_status))
-            pod_metric_list = self.script.get_deployment_metrics(
-                self.script.deployment_name)
-            self.script._iq.write(label="POD metrics under CPU util: {}, Http rate: {}".format(self.cpu_util, self.http_rate),
-                                  value=str(pod_metric_list))
-            # also exit if judge scale complete
-            time.sleep(query_interval)
-
-        return
-
-
 class UserScript(UserScriptV1):
     """User Script class.
 
@@ -200,7 +169,8 @@ class UserScript(UserScriptV1):
             "/redirect/" + self.http_client_pod_ip + ":8080/start"
         payload = {
             "target_url": "http://" + self.http_server_svc_ip + "/cpu",
-            "rate": rate
+            "rate": rate,
+            "calc_count": self.user_args["calc_count"]
         }
 
         # need to align with http client api definition
@@ -208,7 +178,8 @@ class UserScript(UserScriptV1):
         if 200 != resp.status_code:
             self._log.error(
                 "start http client rate fail, err: {}".format(resp.text))
-            raise TestRunError("start http client rate fail, err: {}".format(resp.text))
+            raise TestRunError(
+                "start http client rate fail, err: {}".format(resp.text))
         return
 
     def stop_http_client(self):
@@ -223,8 +194,20 @@ class UserScript(UserScriptV1):
         if 200 != resp.status_code:
             self._log.error(
                 "stop http client rate fail, err: {}".format(resp.text))
-            raise TestRunError("stop http client rate fail, err: {}".format(resp.text))
+            raise TestRunError(
+                "stop http client rate fail, err: {}".format(resp.text))
         return
+
+    def get_http_client_statistics(self):
+        url = "http://" + self.user_args["platform_svc_ip"] + \
+            "/redirect/" + self.http_client_pod_ip + ":8080/statistic"
+        resp = requests.get(url)
+        if 200 != resp.status_code:
+            self._log.error(
+                "get http statistics fail, err: {}".format(resp.text))
+            return None
+
+        return resp.json()
 
     def get_deployment_metrics(self, deployment_name) -> list:
         '''
@@ -269,7 +252,8 @@ class UserScript(UserScriptV1):
         return hpa_status
 
     def get_server_pods_status(self, deployment_name):
-        pod_list = self.core_v1_api.list_namespaced_pod(namespace=self.user_args["k8s_namespace"])
+        pod_list = self.core_v1_api.list_namespaced_pod(
+            namespace=self.user_args["k8s_namespace"])
         pod_status_list = []
         for item in pod_list.items:
             if item.metadata.name.startswith(self.user_args["serverName"] + "-deployment"):
@@ -282,36 +266,86 @@ class UserScript(UserScriptV1):
 
         return pod_status_list
 
-    def monitor_hpa_status(self, cpu_util, http_rate):
-        iter_start_time = time.monotonic()
+    def monitor_hpa_status(self, cpu_util, http_rate, pod_count_begin):
+        iter_start_time = time.time()
+        iter_end_time = 0
+        desired_replicas = 0
+        running_pod_count = 0
+
+        timeout_flag = True
         while True:
-            now = time.monotonic()
-            if (now - iter_start_time) > self.user_args["watch_timeout"]:
-                self._iq.write(label="Monitor duration timeout",
-                               value="start time: {}, end time: {}".format(iter_start_time, now))
-                break
+            time.sleep(int(self.user_args["scaling_query_interval"]))
 
             # query and output hpa status and pod metrics
-            hpa_status = self.get_hpa_status(self.hpa_name)
-            self._iq.write(label="HPA status under CPU util: {}, Http rate: {}".format(cpu_util, http_rate),
-                           value=str(hpa_status))
             pod_metric_list = self.get_deployment_metrics(self.deployment_name)
-            self._iq.write(label="POD metrics under CPU util: {}, Http rate: {}".format(cpu_util, http_rate),
-                           value=str(pod_metric_list))
-            # query pod and compute node association
+            if self.user_args.get("debug", False):
+                self._iq.write(label="POD metrics under CPU util: {}, Http rate: {}".format(cpu_util, http_rate),
+                               value="count: {}, metrics: {}".format(len(pod_metric_list), str(pod_metric_list)))
+            hpa_status = self.get_hpa_status(self.hpa_name)
+            if self.user_args.get("debug", False):
+                self._iq.write(label="HPA status under CPU util: {}, Http rate: {}".format(
+                    cpu_util, http_rate), value=str(hpa_status))
+            desired_replicas = hpa_status["desired_replicas"]
             pod_status_list = self.get_server_pods_status(self.deployment_name)
-            self._iq.write(label="POD node association", value=str(pod_status_list))
+            running_pod_count = len(
+                [x for x in pod_status_list if x["phase"] == "Running"])
 
-            # also exit if judge scale complete
-            '''
-            # below judgement can not be used across different cpu util because it is true when run second cpu_util
-            if (hpa_status["current_replicas"] == hpa_status["desired_replicas"]) \
-                    and (hpa_status["current_replicas"] == len(pod_status_list)):
-                self._iq.write(label="Scaling operation complete",
-                               value="start time: {}, end time: {}".format(iter_start_time, now))
+            if len(pod_status_list) != pod_count_begin:
+                timeout_flag = False
                 break
-            '''
-            time.sleep(int(self.user_args["scaling_query_interval"]))
+
+            now = time.time()
+            if (now - iter_start_time) > self.user_args["watch_timeout"]:
+                timeout_flag = True
+                break
+
+            # Note: Don't compare pod count and desired_replicas now because
+            # they are equal when change http rate but desired_replicas has not been calculated yet,
+            # so we must wait watch time out to find
+            # the correct replicas under this http rate
+
+        if desired_replicas == 0:
+            # It will tacke about 4'30'' to watch the desired replicas change from 0 according to real test
+            raise TestRunError(
+                "watch timeout is not enough for monitor desired replicas change, please increase watch_timeout.")
+
+        if timeout_flag:
+            self._iq.write(label="No scale detect before watching timeout",
+                           value="desired_replicas: {}, running_pod_count: {}".format(desired_replicas, running_pod_count))
+            # Assume HPA controller can calculate desired replicas correctly during watch timeout
+            # keep continue wait until actual running pod count reach to desired_replicas
+            while running_pod_count != desired_replicas:
+                # query and output hpa status and pod metrics
+                pod_metric_list = self.get_deployment_metrics(self.deployment_name)
+                if self.user_args.get("debug", False):
+                    self._iq.write(label="POD metrics under CPU util: {}, Http rate: {}".format(cpu_util, http_rate),
+                                   value="count: {}, metrics: {}".format(len(pod_metric_list), str(pod_metric_list)))
+                hpa_status = self.get_hpa_status(self.hpa_name)
+                if self.user_args.get("debug", False):
+                    self._iq.write(label="HPA status under CPU util: {}, Http rate: {}".format(
+                        cpu_util, http_rate), value=str(hpa_status))
+                desired_replicas = hpa_status["desired_replicas"]
+                pod_status_list = self.get_server_pods_status(
+                    self.deployment_name)
+                running_pod_count = len(
+                    [x for x in pod_status_list if x["phase"] == "Running"])
+                if len(pod_status_list) == desired_replicas:
+                    scale_detect_time = time.time()
+                    self._iq.write(label="Scale detect after watching timeout",
+                                value="desired_replicas: {}, running_pod_count: {}, taken time: {}".format(desired_replicas, running_pod_count, scale_detect_time - iter_start_time))
+                time.sleep(int(self.user_args["scaling_query_interval"]))
+        else:
+            scale_detect_time = time.time()
+            self._iq.write(label="Scale detect before watching timeout",
+                           value="desired_replicas: {}, running_pod_count: {}, taken time: {}".format(desired_replicas, running_pod_count, scale_detect_time - iter_start_time))
+            while running_pod_count != len(pod_status_list):
+                pod_status_list = self.get_server_pods_status(self.deployment_name)
+                running_pod_count = len(
+                    [x for x in pod_status_list if x["phase"] == "Running"])
+                time.sleep(int(self.user_args["scaling_query_interval"]))
+
+        iter_end_time = time.time()
+        return iter_start_time, iter_end_time
 
     def run(self, user_args: dict) -> None:
         """ Execute the user script.
@@ -343,9 +377,6 @@ class UserScript(UserScriptV1):
         self.http_server_svc_ip = self.get_http_server_svc_ip()
         self._log.info("http_server_svc_ip: %s" % self.http_server_svc_ip)
 
-        # create event to sync with monitor thread
-        self.event = Event()
-
         self._iq.write(label="Start HPA test", value="")
         for cpu_util in self.user_args["cpu_util_list"]:
             self._iq.write(label="Start CPU util",
@@ -353,26 +384,56 @@ class UserScript(UserScriptV1):
             self.update_target_cpu_util_in_hpa(cpu_util)
             # sleep some time to make hpa effective
             time.sleep(10)
+
             for http_rate in self.user_args["http_rate_list"]:
+                pod_status_list_begin = self.get_server_pods_status(
+                    self.deployment_name)
+                self._iq.write("Deployment status before setting rate {}".format(http_rate),
+                               "pod count: {}, pod node association: {}".format(len(pod_status_list_begin), str(pod_status_list_begin)))
                 self._iq.write(label="Start http client rate",
                                value="http_rate: {}".format(http_rate))
                 self.start_http_client_rate(http_rate)
-                self.rate_time_begin = time.monotonic()
-                self.monitor_hpa_status(cpu_util, http_rate)
+                self._iq.write(
+                    label="Scale begin, it may take a few minitues, please wait ...", value="")
+                iter_start_time, iter_end_time = self.monitor_hpa_status(
+                    cpu_util, http_rate, len(pod_status_list_begin))
+                pod_status_list_end = self.get_server_pods_status(
+                    self.deployment_name)
+                # judge if scale happened, if yes how much it takes
+                if len(pod_status_list_end) != len(pod_status_list_begin):
+                    duration = iter_end_time - iter_start_time
+                    value = "scale: yes, taken time: {}".format(duration)
+                else:
+                    value = "scale: no"
+                self._iq.write(label="Scale result under CPU util: {}, Http rate: {}".format(
+                    cpu_util, http_rate), value=value)
+                self._iq.write("Deployment final status after setting rate {}".format(http_rate),
+                               "running_pod_count: {}, pod node association: {}".format(len(pod_status_list_end), str(pod_status_list_end)))
+                # output client and server side busy statistics
+                stat = self.get_http_client_statistics()
+                self._iq.write(label="Client and server statistics", value=str(stat))
                 self._iq.write(label="End http client rate",
                                value="http_rate: {}".format(http_rate))
+
             self._iq.write(label="End CPU util",
                            value="cpu_util: {}".format(cpu_util))
-            
+
             # stop http traffic until replicas return to 1
-            self._iq.write(label="Stop http client begin under cpu util: {}".format(cpu_util), value="")
+            self._iq.write(
+                label="Stop http client under cpu util: {}.".format(cpu_util), value="")
+            self._iq.write(
+                label="Scale in begin, it may take a few minitues, please wait ...", value="")
             self.stop_http_client()
+            begin = time.monotonic()
             while True:
-                pod_status_list = self.get_server_pods_status(self.deployment_name)
-                self._iq.write(label="POD status", value=str(pod_status_list))
+                pod_status_list = self.get_server_pods_status(
+                    self.deployment_name)
+                # self._iq.write(label="POD status", value=str(pod_status_list))
                 if len(pod_status_list) == 1:
                     break
-                time.sleep(int(self.user_args["scaling_query_interval"]) * 2)
-            self._iq.write(label="Stop http client end under cpu util: {}".format(cpu_util), value="")
+                time.sleep(int(self.user_args["scaling_query_interval"]))
+            end = time.monotonic()
+            self._iq.write(label="Scale in end",
+                           value="scale in elapsed time: {}".format(end - begin))
 
         self._iq.write(label="End HPA test", value="")

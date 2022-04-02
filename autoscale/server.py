@@ -1,47 +1,77 @@
 import math
 import time
 import os
+from threading import Thread
 from multiprocessing import Process, Pool, Queue
 from queue import Full
 from flask import Flask, request, make_response
 
-app = Flask(__name__)
-queue = Queue(os.cpu_count())
 
-class CaculationWorker(Process):
-    def __init__(self, queue):
+app = Flask(__name__)
+
+# below is new solution Klaus suggested
+class CaculationWorker2(Thread):
+    def __init__(self, count, interval):
         super().__init__()
-        self.queue = queue
+        self.count = count
+        self.interval = interval
+        self.run_flag = True
     
     def run(self):
-        while(True):
-            count = self.queue.get()
+        while(self.run_flag):
             x = 0.0001
-            start = time.monotonic()
-            for i in range(count):
+            for i in range(self.count):
                 x += math.sqrt(x)
-            end = time.monotonic()
-            print("pid: {}, count: {}, time: {}".format(self.pid, count, end - start))
+            time.sleep(self.interval)
 
-workers = []
-for i in range(os.cpu_count()):
-    worker = CaculationWorker(queue)
-    workers.append(worker)
-    worker.start()
-print("created {} worker process".format(os.cpu_count()))
+    def stop(self):
+        self.run_flag = False
 
+worker = None
 @app.route('/')
 def index():
     ''' For readiness or liveness probe. '''
     return "OK"
 
-@app.route('/cpu')
-def consume_cpu():
-    global queue
-    count = request.args.get("count", type=int)
-    try:
-        queue.put_nowait(count)
-    except Full:
-        return make_response(("Too Many Requests", 429))
+@app.route('/start', methods=['POST'])
+def start():
+    '''
+    Accept configuration from client to generate cpu load.
+    Http body is json format like below:
+    {
+        "count": 10000      # calc count once time
+        "interval": 1       # interval sec between two calc
+    }    
+    '''
+    global worker
+    data = request.get_json()
+    if worker:
+        worker.interval = data["interval"]
+        worker.count = int(data["count"])
+    else:
+        worker = CaculationWorker2(data["count"], data["interval"])
+        worker.start()
+
+    return "OK"
+
+@app.route('/stop', methods=['POST'])
+def stop():
+    global worker
+    if worker:
+        worker.stop()
+        worker = None
+
+    return "OK"
+
+@app.route('/cpuload')
+def cpuload():
+    global worker
+    if worker:
+        payload = {
+            "count": worker.count,      # calc count once time
+            "interval": worker.interval       # interval sec between two calc
+        }
+        resp = make_response(payload)
+        return resp
 
     return "OK"

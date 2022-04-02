@@ -6,113 +6,6 @@ import requests
 from flask import Flask, request, Response, make_response
 
 
-class HttpRequestClient(Thread):
-
-    TIMER_INTERVAL = 1
-    DEFAULT_COUNT = 100000
-
-    def __init__(self, url: str, rate: int):
-        super().__init__()
-        self.url = url
-        self.rate = rate
-        self.timer = None
-        self.queue = SimpleQueue()
-        self.run_flag = True
-
-    def timer_function(self):
-        current = time.monotonic()
-
-        # caculate http request count based on rate and actual timer interval
-        duration = current - self.rate_begin_time
-        count = int((duration + self.TIMER_INTERVAL)
-                    * self.rate / 60 - self.sent_reqs)
-        if count > 0:
-            self.queue.put_nowait(count)
-
-        # restart timer
-        self.timer = Timer(self.TIMER_INTERVAL, self.timer_function)
-        self.timer.start()
-
-    def run(self):
-        self.sent_reqs = 0
-        self.rate_begin_time = time.monotonic()
-        self.timer = Timer(self.TIMER_INTERVAL, self.timer_function)
-        self.timer.start()
-
-        while self.run_flag:
-            # get request count from queue
-            request_count = self.queue.get()
-            print("current queue size after get one: {}".format(self.queue.qsize()))
-            cpu_load_duration = 0
-            begin = time.monotonic()
-            for i in range(request_count):
-                # url format: http://server_svc_ip/cpu?count=10000
-                resp = requests.get(
-                    self.url, params={"count": self.DEFAULT_COUNT})
-                cpu_load_duration += float(resp.text)
-                resp.close()
-            self.sent_reqs += request_count
-            end = time.monotonic()
-            total_duration = end - begin
-            print("request count: {}, cpu load_duration: {}, total_duration: {}".format(
-                request_count, cpu_load_duration, total_duration))
-            if total_duration > self.TIMER_INTERVAL:
-                print(
-                    "WARNING: current configuration exceed http sending max capability, please decrease rate or DEFAULT_COUNT.")
-
-    def change_http_rate(self, rate):
-        self.queue.empty()
-        self.sent_reqs = 0
-        self.rate_begin_time = time.monotonic()
-        self.rate = rate
-
-    def stop(self):
-        self.run_flag = False
-        self.timer.cancel()
-
-
-class HttpRequestClient(Thread):
-    DEFAULT_COUNT = 10000
-
-    def __init__(self, url: str, rate: int, calc_count: int):
-        super().__init__()
-        self.url = url
-        self.rate = rate
-        self.calc_count = calc_count
-        self.run_flag = True
-        self.client_busy_count = 0
-        self.server_busy_count = 0
-        self.client_max_request_latency = 0
-
-    def run(self):
-        while self.run_flag:
-            begin = time.monotonic()
-            resp = requests.get(self.url, params={"count": self.calc_count})
-            if resp.status_code == 429:
-                self.server_busy_count += 1
-                print("WARNING: Server queue full because of too many request.")
-            resp.close()
-            end = time.monotonic()
-            latency = end - begin
-            if latency > self.client_max_request_latency:
-                self.client_max_request_latency = latency
-            sleep_time = max((1 / self.rate) - latency, 0)
-            if sleep_time == 0:
-                self.client_busy_count += 1
-            else:
-                print("sleep {}s".format(sleep_time))
-            time.sleep(sleep_time)
-
-    def change_http_rate(self, rate):
-        self.rate = rate
-        self.client_busy_count = 0
-
-    def stop(self):
-        self.run_flag = False
-        self.client_busy_count = 0
-        self.server_busy_count = 0
-
-clientThread = None
 app = Flask(__name__)
 
 
@@ -198,3 +91,42 @@ def statistic():
         return resp
     else:
         return make_response(("please start http traffic client first.", 400))
+'''
+# below is new solution Klaus suggested
+@app.route('/start', methods=['POST'])
+def start():
+
+    Accept configuration from user script to generate cpu load on one pod.
+    Http body is json format like below:
+    {
+        "pod_ip": 172.1.1.1 # server pod ip
+        "count": 10000      # calc count once time
+        "interval": 1       # interval sec between two calc
+    }
+
+    data = request.get_json()
+    url = "http://" + data["pod_ip"] + ":8080/cpu"
+    payload = {
+        "count": data["count"],
+        "interval": data["interval"]
+    }
+    resp = requests.post(url, json=payload)
+    if 200 != resp.status_code:
+        print("set pod cpu load fail. {}".format(str(data)))
+        resp = make_response("set pod cpu load fail. {}".format(str(data)), resp.status_code)
+        return resp
+    else:
+        print("set pod cpu load success. {}".format(str(data)))
+        resp = make_response("set pod cpu load success. {}".format(str(data)), 200)
+        return resp
+
+@app.route('/cpuload', methods=['POST'])
+def stop():
+
+    Accept configuration from user script to generate cpu load on one pod.
+    Http body is json format like below:
+    {
+        "pod_ip": 172.1.1.1 # server pod ip
+    }
+
+'''

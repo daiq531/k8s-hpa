@@ -297,6 +297,7 @@ class UserScript(UserScriptV1):
                 self.pods_dict[pod_name]["ready"] = pods[pod_name]["ready"]
                 self.pods_dict[pod_name]["pod_ip"] = pods[pod_name]["pod_ip"]
                 self.pods_dict[pod_name]["node"] = pods[pod_name]["node"]
+                self.pods_dict[pod_name]["cpu_metric"] = None
 
             # get all pod metrics
             metrics = self.get_deployment_metrics()
@@ -311,12 +312,11 @@ class UserScript(UserScriptV1):
             # create adjuster thread for new created pod
             for pod_name in self.pods_dict.keys():
                 if self.pods_dict[pod_name]["ready"] and not self.pods_dict[pod_name]["thread"]:
-                    if len(self.pods_dict) == self.deployment_init_replicas:
-                        self._iq.write("Initial pod(s) in deployment", "pod_name: {}, pod_ip: {}, node: {}".format(
+                    # output other pod metrics 
+                    value = [{"pod_name": x, "cpu_metric": self.pods_dict[x]["cpu_metric"]} for x in self.pods_dict.keys() if self.pods_dict[x]["cpu_metric"]]
+                    self._iq.write("Pod metrics", str(value))
+                    self._iq.write("Scaled up new pod", "pod_name: {}, pod_ip: {}, node: {}".format(
                         pod_name, self.pods_dict[pod_name]["pod_ip"], self.pods_dict[pod_name]["node"]))
-                    else:
-                        self._iq.write("Scaled up new pod", "pod_name: {}, pod_ip: {}, node: {}".format(
-                            pod_name, self.pods_dict[pod_name]["pod_ip"], self.pods_dict[pod_name]["node"]))
                     pod_ip = self.pods_dict[pod_name]["pod_ip"]
                     thread = PodCPUAdjuster(platform_svc_ip=self.user_args["platform_svc_ip"],
                                             api_client=self.api_client,
@@ -333,8 +333,10 @@ class UserScript(UserScriptV1):
             pod_stable_flags = [
                 x["thread"].stable_flag for x in self.pods_dict.values() if x["thread"]]
             if all(pod_stable_flags) and len(pod_stable_flags) == self.max_replicas:
+                value = [{"pod_name": x, "pod_ip": self.pods_dict[x]["pod_ip"], "node": self.pods_dict[x]
+                          ["node"], "metric": self.pods_dict[x]["cpu_metric"]} for x in self.pods_dict.keys()]
                 self._iq.write("Scale up to max replicas {} done".format(
-                    self.max_replicas), "")
+                    self.max_replicas), value)
                 break
 
             time.sleep(self.user_args["scale_query_interval"])
@@ -351,6 +353,12 @@ class UserScript(UserScriptV1):
                 resp = requests.post(url)
             except Exception as e:
                 self._iq.write("Ignore exception", str(e))
+
+        # wait until pod count to min replicas
+        while True:
+            pods = self.get_deployment_pods(self.deployment_name)
+            if len(pods) == self.min_replicas:
+                break
 
     def get_pod_cpu_request(self):
         cpu_request = 0
@@ -369,8 +377,47 @@ class UserScript(UserScriptV1):
         return int(autoscaler.spec.max_replicas), int(autoscaler.spec.min_replicas)
 
     def get_deployment_init_replicas(self):
-        deployment = self.apps_v1_api.read_namespaced_deployment(name=self.deployment_name, namespace=self.user_args["k8s_namespace"])
+        deployment = self.apps_v1_api.read_namespaced_deployment(
+            name=self.deployment_name, namespace=self.user_args["k8s_namespace"])
         return deployment.spec.replicas
+
+    def do_init_pods_in_deployment(self, target_cpu, cpu_tolerance):        
+        # get all deployment pods
+        pods = self.get_deployment_pods(self.deployment_name)
+        # self._iq.write("pods", str(pods))
+        for pod_name in pods.keys():
+            if pod_name not in self.pods_dict:
+                self.pods_dict[pod_name] = {"thread": None}
+            self.pods_dict[pod_name]["phase"] = pods[pod_name]["phase"]
+            self.pods_dict[pod_name]["ready"] = pods[pod_name]["ready"]
+            self.pods_dict[pod_name]["pod_ip"] = pods[pod_name]["pod_ip"]
+            self.pods_dict[pod_name]["node"] = pods[pod_name]["node"]
+            self.pods_dict[pod_name]["cpu_metric"] = None
+
+        # get all pod metrics
+        metrics = self.get_deployment_metrics()
+        # self._iq.write("metrics", str(metrics))
+        for pod_name in metrics.keys():
+            self.pods_dict[pod_name]["cpu_metric"] = metrics[pod_name]["cpu"]
+
+        for pod_name in self.pods_dict.keys():
+            self._iq.write("Initial pod(s) in deployment", "pod_name: {}, pod_ip: {}, node: {}, metric: {}".format(
+                pod_name, self.pods_dict[pod_name]["pod_ip"], self.pods_dict[pod_name]["node"], self.pods_dict[pod_name]["cpu_metric"]))
+            if self.pods_dict[pod_name]["ready"] and not self.pods_dict[pod_name]["thread"]:
+                pod_ip = self.pods_dict[pod_name]["pod_ip"]
+                thread = PodCPUAdjuster(platform_svc_ip=self.user_args["platform_svc_ip"],
+                                        api_client=self.api_client,
+                                        namespace=self.user_args["k8s_namespace"],
+                                        pod_name=pod_name,
+                                        pod_ip=self.pods_dict[pod_name]["pod_ip"],
+                                        target_cpu=target_cpu,
+                                        tolerance=cpu_tolerance,
+                                        log=self.log,
+                                        iq=self._iq)
+                thread.start()
+                self.pods_dict[pod_name]["thread"] = thread
+
+        return
 
     def run(self, user_args: dict) -> None:
         """ Execute the user script.
@@ -409,12 +456,12 @@ class UserScript(UserScriptV1):
             self.update_target_cpu_util_in_hpa(cpu_util)
             # sleep some time to make hpa effective
             time.sleep(10)
-
             target_cpu = (cpu_util / 100 * cpu_request)
             if (target_cpu + self.user_args["cpu_tolerance"]) >= 2 * target_cpu:
                 self._log.info("WARNING: tolerance is too large.")
             # To make scale out happen, target cpu must be 1.1 times of target cpu util
             # https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#algorithm-details
+            self.do_init_pods_in_deployment(math.ceil(target_cpu * 1.1), self.user_args["cpu_tolerance"])
             self.monitor_autoscale_status(
                 math.ceil(target_cpu * 1.1), self.user_args["cpu_tolerance"])
             self._iq.write(label="End CPU util",
@@ -422,7 +469,8 @@ class UserScript(UserScriptV1):
 
             # stop cpu load to make deployment scale down to 1
             self.scale_down_deployment()
-            self._iq.write("Scalce down to min replicas {} complete".format(self.min_replicas), "")
+            self._iq.write("Scalce down to min replicas {} complete".format(
+                self.min_replicas), "")
             self.pods_dict = {}
 
         self._iq.write(label="End HPA test", value="")

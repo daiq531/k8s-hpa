@@ -392,7 +392,7 @@ class UserScript(UserScriptV1):
             raise TestRunError("update target cpu util %d fail!" % cpu_util)
         autoscaler = json.loads(resp.data.decode('utf-8'))
         # return int(autoscaler.spec.max_replicas), int(autoscaler.spec.min_replicas)
-        return int(autoscaler["spec"]["max_replicas"]), int(autoscaler["spec"]["min_replicas"])
+        return int(autoscaler["spec"]["maxReplicas"]), int(autoscaler["spec"]["minReplicas"])
 
     def get_deployment_init_replicas(self):
         deployment = self.apps_v1_api.read_namespaced_deployment(

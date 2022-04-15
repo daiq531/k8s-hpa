@@ -261,6 +261,14 @@ class UserScript(UserScriptV1):
         }
         if autoscaler.api_version == "autoscaling/v1":
             hpa_status["current_cpu_utilization_percentage"] = autoscaler.status.current_cpu_utilization_percentage
+        elif autoscaler.api_version == "autoscaling/v2beta2":
+            cpu = 0
+            for metric in autoscaler.status.current_metrics:
+                if metric.type == "Resource":
+                    if metric.resource.name == "cpu":
+                        cpu_util = metric.resource.current.average_utilization
+                        break
+            hpa_status["current_cpu_utilization_percentage"] = cpu_util
         else:
             raise TestRunError(
                 "unsupported HPA version {}".format(autoscaler.api_version))

@@ -73,7 +73,7 @@ resources:
 
 autoscaling:
   enabled: true
-  version: v1
+  version: v2beta2
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 50

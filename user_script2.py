@@ -380,9 +380,19 @@ class UserScript(UserScriptV1):
         return cpu_request
 
     def get_max_min_replicas_in_hpa(self):
-        autoscaler = self.autoscaling_api.read_namespaced_horizontal_pod_autoscaler_status(
-            self.hpa_name, self.user_args["k8s_namespace"])
-        return int(autoscaler.spec.max_replicas), int(autoscaler.spec.min_replicas)
+        self.log.info("enter get_max_min_replicas_in_hpa.")
+        try:
+            resp = self.autoscaling_api.read_namespaced_horizontal_pod_autoscaler(
+                self.hpa_name, self.user_args["k8s_namespace"], _preload_content=False)
+        except ValueError as e:
+            if str(exception) == 'Invalid value for `conditions`, must not be `None`':
+                self._log.info('Skipping invalid \'conditions\' value...')
+        except Exception as e:
+            self._log.error("update hpa error: %s" % str(e))
+            raise TestRunError("update target cpu util %d fail!" % cpu_util)
+        autoscaler = json.loads(resp.data.decode('utf-8'))
+        # return int(autoscaler.spec.max_replicas), int(autoscaler.spec.min_replicas)
+        return int(autoscaler["spec"]["max_replicas"], int(autoscaler["spec"]["min_replicas"]
 
     def get_deployment_init_replicas(self):
         deployment = self.apps_v1_api.read_namespaced_deployment(

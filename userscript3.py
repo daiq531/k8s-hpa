@@ -355,16 +355,7 @@ class UserScript(UserScriptV1):
 
     def scale_down_deployment(self):
         # stop adjuster thread
-        for pod_name in self.pods_dict.keys():
-            if self.pods_dict[pod_name]["thread"]:
-                self.pods_dict[pod_name]["thread"].stop()
-            pod_ip = self.pods_dict[pod_name]["pod_ip"]
-            url = "http://" + self.user_args["platform_svc_ip"] + \
-                "/redirect/" + pod_ip + ":8080/stop"
-            try:
-                resp = requests.post(url)
-            except Exception as e:
-                self._iq.write("Ignore exception", str(e))
+        self.stop_http_client()
 
         # wait until pod count to min replicas
         while True:
@@ -438,6 +429,82 @@ class UserScript(UserScriptV1):
 
         return
 
+    def start_http_client_rate(self, rate):
+        # construct redirect url via platform service as http proxy
+        url = "http://" + self.user_args["platform_svc_ip"] + \
+            "/redirect/" + self.http_client_pod_ip + ":8080/start"
+        payload = {
+            "target_url": "http://" + self.http_server_svc_ip + "/cpu",
+            "rate": rate,
+            "calc_count": self.user_args["calc_count"]
+        }
+
+        # need to align with http client api definition
+        resp = requests.post(url, json=payload)
+        if 200 != resp.status_code:
+            self._log.error(
+                "start http client rate fail, err: {}".format(resp.text))
+            raise TestRunError(
+                "start http client rate fail, err: {}".format(resp.text))
+        return
+
+    def stop_http_client(self):
+        # construct redirect url via platform service as http proxy
+        url = "http://" + self.user_args["platform_svc_ip"] + \
+            "/redirect/" + self.http_client_pod_ip + ":8080/stop"
+        payload = {
+            "target_url": "http://" + self.http_server_svc_ip + "/cpu",
+        }
+        # need to align with http client api definition
+        resp = requests.post(url, json=payload)
+        if 200 != resp.status_code:
+            self._log.error(
+                "stop http client rate fail, err: {}".format(resp.text))
+            raise TestRunError(
+                "stop http client rate fail, err: {}".format(resp.text))
+        return
+
+    def trigger_and_monitor_autoscale_status(self):
+        self.pods = self.get_deployment_pods(self.deployment_name)
+        self._iq.write("Init pod in deployment", str(self.pods))
+
+        self.current_rate = self.user_args.get("http_base_rate", 100)
+        self.step_rate = self.user_args.get("step_rate", 50)      
+
+        while True:
+            # start http rate
+            self.start_http_client_rate(self.current_rate)
+            time.sleep(self.user_args.get("stablization_secs", 60))
+
+            pods = self.get_deployment_pods(self.deployment_name)
+
+            if len(pods) != len(self.pods):
+                for pod_name in pods.keys():
+                    if pod_name not in self.pods.keys():
+                        self._iq.write("Scaled new pod", pod_name + ":" + pods[pod_name])
+            else:
+                # output current metrics
+                metrics = self.get_deployment_metrics()
+                self._iq.write("Pod metrics", str(metrics))
+
+            if len(pods) >= self.max_replicas:
+                break
+
+            self.current_rate += self.step_rate
+      
+    def get_http_client_pod_ip(self):
+        client_deployment_name = self.user_args["clientName"] + "-deployment"
+        pod_list = self.core_v1_api.list_namespaced_pod(namespace=self.user_args["k8s_namespace"],
+                                                        label_selector="app=http-client")
+        pod = None
+        for item in pod_list.items:
+            if item.metadata.name.startswith(client_deployment_name):
+                pod = item
+        if not pod:
+            raise TestRunError("can't find client pod resource.")
+
+        return pod.status.pod_ip
+
     def run(self, user_args: dict) -> None:
         """ Execute the user script.
 
@@ -450,6 +517,8 @@ class UserScript(UserScriptV1):
         self.deployment_name = self.user_args["serverName"] + "-deployment"
         self.server_svc_name = self.user_args["serverName"] + "-svc"
         self.hpa_name = self.user_args["serverName"] + "-hpa"
+
+        self.http_client_pod_ip = self.get_http_client_pod_ip()
 
         # construct corespondent autoscaling api object, input version must be same as helm chart version
         if self.user_args["autoscaling_version"] == "v1":
@@ -469,20 +538,14 @@ class UserScript(UserScriptV1):
             str(cpu_request), self.deployment_init_replicas, self.min_replicas, self.max_replicas))
 
         self._iq.write(label="Start HPA test", value="")
+
         for cpu_util in self.user_args["cpu_util_list"]:
             self._iq.write(label="Start CPU util",
                            value="cpu_util: {}".format(cpu_util))
             self.update_target_cpu_util_in_hpa(cpu_util)
             # sleep some time to make hpa effective
             time.sleep(10)
-            target_cpu = (cpu_util / 100 * cpu_request)
-            if (target_cpu + self.user_args["cpu_tolerance"]) >= 2 * target_cpu:
-                self._log.info("WARNING: tolerance is too large.")
-            # To make scale out happen, target cpu must be 1.1 times of target cpu util
-            # https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#algorithm-details
-            self.do_init_pods_in_deployment(math.ceil(target_cpu * 1.1), self.user_args["cpu_tolerance"])
-            self.monitor_autoscale_status(
-                math.ceil(target_cpu * 1.1), self.user_args["cpu_tolerance"])
+            self.trigger_and_monitor_autoscale_status()
             self._iq.write(label="End CPU util",
                            value="cpu_util: {}".format(cpu_util))
 
@@ -490,6 +553,5 @@ class UserScript(UserScriptV1):
             self.scale_down_deployment()
             self._iq.write("Scalce down to min replicas {} complete".format(
                 self.min_replicas), "")
-            self.pods_dict = {}
 
         self._iq.write(label="End HPA test", value="")

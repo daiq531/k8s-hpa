@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autoscale-server
+  labels:
+    app: autoscale-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: autoscale-server
+  template:
+    metadata:
+      labels:
+        app: autoscale-server
+    spec:
+      containers:
+        - name: php
+          image: php:7.2-apache
+          ports:
+            - containerPort: 5122
+          volumeMounts:
+            - mountPath: /var/www/html
+              name: php-scripts
+            - mountPath: /etc/apache2/sites-available/000-default.conf
+              subPath: 000-default.conf
+              name: apacheconf
+            - mountPath: /etc/apache2/ports.conf
+              subPath: ports.conf
+              name: apacheconf
+      volumes:
+        - name: php-scripts
+          configMap:
+            name: autoscale-scripts
+        - name: apacheconf
+          configMap:
+            name: autoscale-apacheconf
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscale-apacheconf
+  labels:
+    app: autoscale-server
+data:
+  "ports.conf": |
+    # Empty ports.conf
+    # Listen statements are in the sites conf files.
+
+  "000-default.conf": |
+    Listen 5122
+    <VirtualHost *:5122>
+        ServerAdmin webmaster@localhost
+        DocumentRoot /var/www/html
+        ErrorLog ${APACHE_LOG_DIR}/error.log
+        CustomLog ${APACHE_LOG_DIR}/access.log combined
+    </VirtualHost>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscale-scripts
+  labels:
+    app: autoscale-server
+data:
+  "cpuload.php" : |
+    <?php
+    $started = microtime(true);
+    // CPU stress test
+    for($i = 0; $i < 30000; $i++) {
+        $a = sqrt($i);
+    }
+    $ended = microtime(true);
+    if (!empty($_GET['print'])) {
+        echo '       Php: ' . PHP_VERSION ."\n";
+    //    echo '   Started: ' . $started ."\n";
+    //    echo '     Ended: ' . $ended ."\n";
+        echo 'Total Time: ' . round( $ended - $started, 4)."\n";
+    }
+    ?>
+  "cpuload-crypt.php": |
+    <?php
+    $started = microtime(true);
+    $string = 'letsburnsomecpu';
+    $key = 'mysupersecretkey';
+    $method = 'AES256';
+    $iv = 'aninsecureivhere';
+    $times_run = 0;
+    while ( $times_run < 500000 ) {
+            $encrypted = openssl_encrypt( $string, $method, $key, null, $iv );
+            $decrypted = openssl_decrypt( $encrypted, $method, $key, null, $iv );
+            $times_run++;
+    }
+    $ended = microtime(true);
+    if (!empty($_GET['print'])) {
+        echo '       Php: ' . PHP_VERSION ."\n";
+    //    echo '   Started: ' . $started ."\n";
+    //    echo '     Ended: ' . $ended ."\n";
+        echo 'Total Time: ' . round( $ended - $started, 4)."\n";
+    }
+  "memload.php": |
+    # memload script
+  "blkload.php": |
+    # block IO Load script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autoscale-server
+spec:
+  type: ClusterIP
+  selector:
+    app: autoscale-server
+  ports:
+  - port: 80
+    targetPort: 5122

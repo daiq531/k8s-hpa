@@ -35,24 +35,33 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: 5122
               protocol: TCP
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 8080
+          # readinessProbe:
+          #   httpGet:
+          #     path: /
+          #     port: 8080
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
-          - mountPath: /data
-            name: server-script
+            - mountPath: /var/www/html
+              name: php-scripts
+            - mountPath: /etc/apache2/sites-available/000-default.conf
+              subPath: 000-default.conf
+              name: apacheconf
+            - mountPath: /etc/apache2/ports.conf
+              subPath: ports.conf
+              name: apacheconf
       volumes:
-      - name: server-script
-        configMap:
-          name: autoscale-script
-          items:
-            - key: server.py
-              path: app.py
+        - name: php-scripts
+          configMap:
+            name: autoscale-script
+            items:
+              - key: cpuload.php
+                path: cpuload.php
+        - name: apacheconf
+          configMap:
+            name: autoscale-apacheconf
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -85,7 +94,8 @@ spec:
     spec:
       containers:
         - name: http-client
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          # image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "registry.oriontest.net/flask-app:v1.0"
           imagePullPolicy: IfNotPresent
           ports:
           - containerPort: 8080
@@ -103,6 +113,10 @@ spec:
           items:
             - key: client.py
               path: app.py
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 
 # ---
 # apiVersion: v1
@@ -132,3 +146,44 @@ spec:
 #       items:
 #         - key: client.py
 #           path: app.py
+
+
+# php server
+# ---
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: autoscale-server
+#   labels:
+#     app: autoscale-server
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: autoscale-server
+#   template:
+#     metadata:
+#       labels:
+#         app: autoscale-server
+#     spec:
+#       containers:
+#         - name: php
+#           image: php:7.2-apache
+#           ports:
+#             - containerPort: 5122
+#           volumeMounts:
+#             - mountPath: /var/www/html
+#               name: php-scripts
+#             - mountPath: /etc/apache2/sites-available/000-default.conf
+#               subPath: 000-default.conf
+#               name: apacheconf
+#       volumes:
+#         - name: php-scripts
+#           configMap:
+#             name: autoscale-script
+#             items:
+#               - key: cpuload.php
+#                 path: index.php
+#         - name: apacheconf
+#           configMap:
+#             name: autoscale-apacheconf

@@ -13,7 +13,7 @@ replicaCount: 1
 image:
   # repository: quasarstack/flask
   # repository: registry.oriontest.net/flask-app
-  repository: php
+  repository: wsartifactory.ws.vici.verizon.com:443/test/spirent/php
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "7.2-apache"
@@ -81,8 +81,8 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
 
-nodeSelector:
-  node-role.kubernetes.io/worker: ""
+nodeSelector: {}
+  # node-role.kubernetes.io/worker: ""
 
 tolerations: []
 

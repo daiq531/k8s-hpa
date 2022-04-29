@@ -429,14 +429,22 @@ class UserScript(UserScriptV1):
 
         return
 
+    def get_http_server_svc_ip(self):
+        svc = self._k8s_client.v1_core_api.read_namespaced_service(
+            name=self.server_svc_name,
+            namespace=self.user_args["k8s_namespace"]
+        )
+
+        return svc.spec.cluster_ip
+
     def start_http_client_rate(self, rate):
         # construct redirect url via platform service as http proxy
         url = "http://" + self.user_args["platform_svc_ip"] + \
             "/redirect/" + self.http_client_pod_ip + ":8080/start"
         payload = {
-            "target_url": "http://" + self.http_server_svc_ip + "/cpu",
+            "target_url": "http://" + self.http_server_svc_ip + "/cpuload.php",
             "rate": rate,
-            "calc_count": self.user_args["calc_count"]
+            "count": self.user_args["calc_count"]
         }
 
         # need to align with http client api definition
@@ -468,8 +476,8 @@ class UserScript(UserScriptV1):
         self.pods = self.get_deployment_pods(self.deployment_name)
         self._iq.write("Init pod in deployment", str(self.pods))
 
-        self.current_rate = self.user_args.get("http_base_rate", 100)
-        self.step_rate = self.user_args.get("step_rate", 50)      
+        self.current_rate = self.user_args.get("http_base_rate", 20)
+        self.step_rate = self.user_args.get("step_rate", 10)      
 
         while True:
             # start http rate
@@ -481,11 +489,12 @@ class UserScript(UserScriptV1):
             if len(pods) != len(self.pods):
                 for pod_name in pods.keys():
                     if pod_name not in self.pods.keys():
-                        self._iq.write("Scaled new pod", pod_name + ":" + pods[pod_name])
+                        self._iq.write("Scaled new pod", pod_name + ":" + str(pods[pod_name]))
+                self.pods = pods
             else:
                 # output current metrics
                 metrics = self.get_deployment_metrics()
-                self._iq.write("Pod metrics", str(metrics))
+                self._iq.write("Http rate {}".format(self.current_rate), str(metrics))
 
             if len(pods) >= self.max_replicas:
                 break
@@ -519,6 +528,9 @@ class UserScript(UserScriptV1):
         self.hpa_name = self.user_args["serverName"] + "-hpa"
 
         self.http_client_pod_ip = self.get_http_client_pod_ip()
+        self._log.info("http_client_pod_ip: %s" % self.http_client_pod_ip)
+        self.http_server_svc_ip = self.get_http_server_svc_ip()
+        self._log.info("http_server_svc_ip: %s" % self.http_server_svc_ip)
 
         # construct corespondent autoscaling api object, input version must be same as helm chart version
         if self.user_args["autoscaling_version"] == "v1":

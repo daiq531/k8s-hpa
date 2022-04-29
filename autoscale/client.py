@@ -69,7 +69,7 @@ class HTTPRequestLoadGenerator(object):
         # Print status if the number of timer loops is divisible by the loop rate * REPORT_RATE.
         self.timer_loop_cnt += 1
         if self.timer_loop_cnt % (self.interval_per_second * REPORT_RATE) == 0:
-            expected = (time.time() - self.start_timestamp) * rate
+            expected = (time.time() - self.start_timestamp) * self.rate
             rate_error = ((expected - SENT) / SENT) * 100
             print(f"STATUS"
                   f" - threads: {threading.active_count()}"
@@ -144,7 +144,7 @@ class HTTPRequestLoadGenerator(object):
             else:
                 self.executor.shutdown(wait=True)
         self.reset_global_vars()
-        
+
 generator = None
 
 # below is new solution Klaus suggested

@@ -95,7 +95,8 @@ spec:
       containers:
         - name: http-client
           # image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          image: "registry.oriontest.net/flask-app:v1.0"
+          # image: "registry.oriontest.net/flask-app:v1.0"
+          image: "wsartifactory.ws.vici.verizon.com:443/test/spirent/flask-app:v1.0"
           imagePullPolicy: IfNotPresent
           ports:
           - containerPort: 8080

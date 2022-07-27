@@ -17,12 +17,28 @@
     70f67ee94e3f5c42dacb8194356e4ddf55f825192419012f422aa79d7726c5d5baf454b88619ded01d391b140d6cc5c86f4633cf874064bd6531cb5cc7057059e10490a9118130eb8bf55f23d19d731909822f2c2160d9cd222ce2c8286ece6bfdbf303786ffd3ac70e968f05b2d0dca7a73a17b0b1d5bb4d69738f32cfa605a4bec4f90d8273a46f8e966fd7e5d6532d02183b0eb5dc462886bc9044eb2b1ce5ac29644df82ccb4b9eb82524c2970f67ee94e3f5c42dacb8194356e4ddf55f825192419012f422aa79d7726c5d5baf454b88619ded01d391b140d6cc5c86f4633cf874064bd6531cb5cc7057059e10490a9118130eb8bf55f23d19d731909822f2c2160d9cd222ce2c8286ece6bfdbf303786ffd3ac70e968f05b2d0dca7a73a17b0b1d5bb4d69738f32cfa605a4bec4f90d8273a46f8e966fd7e5d6532d02183b0eb5dc462886bc9044eb2b1ce5ac29644df82ccb4b9eb82524c2970f67ee94e3f5c42dacb8194356e4ddf55f825192419012f422aa79d7726c5d5baf454b88619ded01d391b140d6cc5c86f4633cf874064bd6531cb5cc7057059e10490a9118130eb8bf55f23d19d731909822f2c2160d9cd222ce2c8286ece6bfdbf303786ffd3ac70e968f05b2d0dca7a73a17b0b1d5bb4d69738f32cfa605a4bec4f90d8273a46f8e966fd7e5d6532d02183b0eb5dc462886bc9044eb2b1ce5ac2962
     70f67ee94e3f5c42dacb8194356e4ddf55f825192419012f422aa79d7726c5d5baf454b88619ded01d391b140d6cc5c86f4633cf874064bd6531cb5cc7057059e10490a9118130eb8bf55f23d19d731909822f2c2160d9cd222ce2c8286ece6bfdbf303786ffd3ac70e968f05b2d0dca7a73a17b0b1d5bb4d69738f32cfa605a4bec4f90d8273a46f8e966fd7e5d6532d02183b0eb5dc462886bc9044eb2b1ce5ac29644df82ccb4b9eb82524c2970f67ee94e3f5c42dacb8194356e4ddf55f825192419012f422aa79d7726c5d5baf454b88619ded01d391b140d6cc5c86f4633cf874064bd6531cb5cc7057059e10490a9118130eb8bf55f23d19d731909822f2c2160d9cd222ce2c8286ece6bfdbf303786ffd3ac70e968f05b2d0dca7a73a17b0b1d5bb4d69738f32cfa605a4bec4f90d8273a46f8e966fd7e5d6532d02183b0eb5dc462886bc9044eb2b1ce5ac29644df82ccb4b9eb82524c2970f67ee94e3f5c42dacb8194356e4ddf55f825192419012f422aa79d7726c5d5baf454b88619ded01d391b140d6cc5c86f4633cf874064bd6531cb5cc7057059e10490a9118130eb8bf55f23d19d731909822f2c2160d9cd222ce2c8286ece6bfdbf303786ffd3ac70e968f05b2d0dca7a73a17b0b1d5bb4d69738f32cfa605a4bec4f90d8273a46f8e966fd7e5d6532d02183b0eb5dc462886bc9044eb2b1ce5ac2962";
     
+    // // Memory Consumtion test  - @ 1000 will consume ~16MB of RAM.
+    // $mem_array = array();
+    // for($i = 0; $i < 1000; $i++) {
+    //     // $arstr = $str16k;
+    //     // $arstr .= " {$i}"; // Modify the string so it is cloned in memory
+    //     // $mem_array[$i] = $arstr;  // Assign the cloned string to an array so it stays in memory.
+    //     $mem_array[$i] = $str16k . " {$i}";
+    // }
+    // usleep(120*500000);  // Sleep for 1/2 second.
+    // for($i = 0; $i < 1000; $i++) {
+    //     unset($mem_array[$i]);
+    // }
+    // unset($mem_array);
+
     // Memory Consumtion test  - @ 1000 will consume ~16MB of RAM.
     $mem_array = array();
     for($i = 0; $i < 1000; $i++) {
-        $mem_array[] = '{$i} - {$str16k}'; // make each string a unique concatenated string.
+        $arstr = $str16k;
+        $arstr .= " {$i}";
+        $mem_array[] = $arstr;
     }
-    usleep(240*500000); // Sleep for 1/2 second.
+    usleep(500000); // Sleep for 1/2 second.
 
     $ended = microtime(true);
     if (!empty($_GET['print'])) {

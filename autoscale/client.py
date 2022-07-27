@@ -40,7 +40,7 @@ def send_http_request(url, count, req_cnt=1):
             SUCCESS += 1
         else:
             FAIL += 1
-        resp.close()
+        # resp.close()
 
 class HTTPRequestLoadGenerator(object):
 
@@ -70,8 +70,8 @@ class HTTPRequestLoadGenerator(object):
         self.timer_loop_cnt += 1
         if self.timer_loop_cnt % (self.interval_per_second * REPORT_RATE) == 0:
             expected = (time.time() - self.start_timestamp) * self.rate
-            rate_error = ((expected - SENT) / SENT) * 100
-            print(f"STATUS"
+            rate_error = ((expected - SENT) / expected) * 100
+            print(f"{time.asctime(time.gmtime())}"
                   f" - threads: {threading.active_count()}"
                   f" - pass/fail:  {SUCCESS}/{FAIL}"
                   f" - rate_error: {rate_error:.2f}%")

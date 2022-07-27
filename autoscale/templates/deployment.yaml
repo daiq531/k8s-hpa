@@ -46,6 +46,8 @@ spec:
           volumeMounts:
             - mountPath: /var/www/html
               name: php-scripts
+            - mountPath: /usr/local/etc/php/
+              name: php-conf
             - mountPath: /etc/apache2/sites-available/000-default.conf
               subPath: 000-default.conf
               name: apacheconf
@@ -61,6 +63,14 @@ spec:
                 path: cpuload.php
               - key: memload.php
                 path: memload.php
+              - key: info.php
+                path: info.php
+        - name: php-conf
+          configMap:
+            name: autoscale-script
+            items:
+              - key: php.ini
+                path: php.ini
         - name: apacheconf
           configMap:
             name: autoscale-apacheconf

@@ -4,7 +4,7 @@ metadata:
   name: autoscale-script
 data:
   {{- $files := .Files }}
-  {{- range tuple "server.py" "client.py" "cpuload.php" "memload.php"}}
+  {{- range tuple "server.py" "client.py" "cpuload.php" "memload.php" "info.php" "php.ini"}}
   {{ . }}: |-
     {{- $files.Get . | nindent 4}}
   {{- end }}

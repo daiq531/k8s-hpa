@@ -6,6 +6,7 @@ metadata:
     {{- include "autoscale.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
+  # type: LoadBalancer
   ports:
     - port: {{ .Values.service.port }}
       targetPort: 5122

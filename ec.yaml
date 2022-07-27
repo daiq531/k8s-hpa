@@ -7,6 +7,7 @@ clusters:
 contexts:
 - context:
     cluster: edgecloud
+    namespace: qdai
     user: admin
   name: edgecloud
 current-context: edgecloud

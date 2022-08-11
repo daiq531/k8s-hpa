@@ -67,10 +67,10 @@ resources:
   # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
   limits:
     cpu: 1500m
-    # memory: 1024Mi
+    memory: 1536Mi
   requests:
     cpu: 1000m
-    # memory: 1024Mi
+    memory: 1024Mi
 
 autoscaling:
   enabled: true
@@ -78,7 +78,7 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
-  # targetMemoryUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
 
 nodeSelector: {}
   # node-role.kubernetes.io/worker: ""

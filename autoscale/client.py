@@ -125,9 +125,9 @@ class HTTPRequestLoadGenerator(object):
 
             # flush executor to make new config take effect quicker
             if sys.version_info.minor >= 9:
-                self.executor.shutdown(wait=True, cancel_futures=True)
+                self.executor.shutdown(wait=False, cancel_futures=True)
             else:
-                self.executor.shutdown(wait=True)
+                self.executor.shutdown(wait=False)
             self.reset_global_vars()
             self.executor = ThreadPoolExecutor(self.MAX_WORKER_NUM)
             # self.executor = ProcessPoolExecutor()
@@ -140,9 +140,9 @@ class HTTPRequestLoadGenerator(object):
             self.timer.cancel()
         if self.executor:
             if sys.version_info.minor >= 9:
-                self.executor.shutdown(wait=True, cancel_futures=True)
+                self.executor.shutdown(wait=False, cancel_futures=True)
             else:
-                self.executor.shutdown(wait=True)
+                self.executor.shutdown(wait=False)
         self.reset_global_vars()
 
 generator = None

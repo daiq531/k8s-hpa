@@ -10,4 +10,4 @@ In fastcgi directory there is one fastcgi app implementation in C language. It's
 
 There are some piece of code in other dir which are provided by Mark or some trial script by me.
 
-The user scripts in root dir can be run in CSure NFVI_LGC_HELM3_GENERIC_01 test case.
+The user scripts in root dir can be run in CSure NFVI_LGC_HELM3_GENERIC_01 test case. The final user script file is userscript.py in root dir. Other python file in root dir are trial scripts.
